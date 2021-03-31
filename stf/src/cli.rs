@@ -447,24 +447,8 @@ fn get_pair_from_str(matches: &ArgMatches<'_>, account: &str) -> sr25519::AppPai
 
 
 
-fn get_pair_from_str(matches: &ArgMatches<'_>, account: &str) -> sr25519::AppPair {
-    info!("getting pair for {}", account);
-    match &account[..2] {
-        "//" => sr25519::AppPair::from_string(account, None).unwrap(),
-        _ => {
-            info!("fetching from keystore at {}", &KEYSTORE_PATH);
-            // open store without password protection
-            let store =
-                LocalKeystore::open(get_keystore_path(matches), None).expect("store should exist");
-            info!("store opened");
-            let _pair = store
-                .key_pair::<sr25519::AppPair>(
-                    &sr25519::Public::from_ss58check(account).unwrap().into(),
-                )
-                .unwrap();
-            info!("key pair fetched");
-            drop(store);
-            _pair
-        }
-    }
+fn get_nonce(matches: &ArgMatches<'_>, account: &str) -> sr25519::AppPair {
+    // check if nonce locally available
+
+    //
 }
