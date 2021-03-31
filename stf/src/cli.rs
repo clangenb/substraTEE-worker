@@ -26,12 +26,15 @@ use sp_core::{crypto::Ss58Codec, sr25519 as sr25519_core, Pair};
 use sp_runtime::traits::IdentifyAccount;
 use std::path::PathBuf;
 use substrate_client_keystore::LocalKeystore;
+use std::collections::HashMap;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const KEYSTORE_PATH: &str = "my_trusted_keystore";
 
+
 pub fn cmd<'a>(
     perform_operation: &'a dyn Fn(&ArgMatches<'_>, &TrustedOperation) -> Option<Vec<u8>>,
+    account_nonce_map: HashMap<AccountId,Index>,
 ) -> MultiCommand<'a, str, str> {
     Commander::new()
         .options(|app| {
@@ -420,6 +423,30 @@ fn get_accountid_from_str(account: &str) -> AccountId {
 
 // TODO this function is redundant with client::main
 // get a pair either form keyring (well known keys) or from the store
+fn get_pair_from_str(matches: &ArgMatches<'_>, account: &str) -> sr25519::AppPair {
+    info!("getting pair for {}", account);
+    match &account[..2] {
+        "//" => sr25519::AppPair::from_string(account, None).unwrap(),
+        _ => {
+            info!("fetching from keystore at {}", &KEYSTORE_PATH);
+            // open store without password protection
+            let store =
+                LocalKeystore::open(get_keystore_path(matches), None).expect("store should exist");
+            info!("store opened");
+            let _pair = store
+                .key_pair::<sr25519::AppPair>(
+                    &sr25519::Public::from_ss58check(account).unwrap().into(),
+                )
+                .unwrap();
+            info!("key pair fetched");
+            drop(store);
+            _pair
+        }
+    }
+}
+
+
+
 fn get_pair_from_str(matches: &ArgMatches<'_>, account: &str) -> sr25519::AppPair {
     info!("getting pair for {}", account);
     match &account[..2] {

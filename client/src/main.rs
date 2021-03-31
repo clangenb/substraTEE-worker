@@ -73,6 +73,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn main() {
     env_logger::init();
+    let mut account_nonce_map: HashMap<AccountId,Index> = HashMap::new();
 
     let res = Commander::new()
         .options(|app| {
@@ -418,7 +419,7 @@ fn main() {
                     Ok(())
                 }),
         )
-        .add_cmd(substratee_stf::cli::cmd(&perform_trusted_operation))
+        .add_cmd(substratee_stf::cli::cmd(&perform_trusted_operation, account_nonce_map))
         .no_cmd(|_args, _matches| {
             println!("No subcommand matched");
             Ok(())
