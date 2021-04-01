@@ -41,6 +41,7 @@ use sp_core::{
     sr25519,
     storage::StorageKey,
     Pair,
+    H256,
 };
 use sp_keyring::AccountKeyring;
 use substrate_api_client::{utils::FromHexString, Api, GenericAddress, XtStatus};
@@ -55,7 +56,15 @@ use enclave::worker_api_direct_server::start_worker_api_direct_server;
 use sp_finality_grandpa::{AuthorityList, VersionedAuthorityList, GRANDPA_AUTHORITIES_KEY};
 use std::time::{Duration, SystemTime};
 
-use substratee_worker_primitives::block::SignedBlock as SignedSidechainBlock;
+use substratee_worker_primitives::block::{
+    Block as SidechainBlock, SignedBlock as SignedSidechainBlock, StatePayload,
+    SidechainBlockNumber
+};
+
+use std::convert::TryFrom;
+
+
+use parity_rocksdb::rocksdb::{DB, Writable, WriteBatch};
 
 mod constants;
 mod enclave;
@@ -67,6 +76,9 @@ const BLOCK_SYNC_BATCH_SIZE: u32 = 1000;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// start block production every ... ms
 const BLOCK_PRODUCTION_INTERVAL: u64 = 1000;
+
+/// key value of sidechain db of last block
+const LAST_BLOCK_KEY_VALUE: &[u8] = b"last_sidechainblock";
 
 fn main() {
     // Setup logging
@@ -774,6 +786,18 @@ pub unsafe extern "C" fn ocall_worker_request(
     sgx_status_t::SGX_SUCCESS
 }
 
+
+
+/// Contains the blocknumber and blokhash of the
+/// last sidechain block
+#[derive(PartialEq, Eq, Clone, Encode, Decode, Debug)]
+pub struct LastSidechainBlock {
+    /// hash of the last sidechain block
+    hash: H256,
+    /// block number of the last sidechain block
+    number: SidechainBlockNumber,
+}
+
 /// # Safety
 ///
 /// FFI are always unsafe
@@ -829,7 +853,57 @@ pub unsafe extern "C" fn ocall_send_block_and_confirmation(
         }
     };
     println! {"Received blocks: {:?}", signed_blocks};
+
     // TODO: M8.3: Store blocks
+    // FIXME: Error handling?
+    if !signed_blocks.is_empty() {
+        let mut batch = WriteBatch::new();
+        let mut db = DB::open_default("../bin/sidechainblock_db").unwrap();
+        // is this really necessary?
+        // FIXME: use LastSidechainBlock struct instead.
+        // FIXME: which database should be used?
+        let (mut last_block_hash, mut last_block_nr) = match db.get(LAST_BLOCK_KEY_VALUE) {
+            Ok(Some(last_block_encoded)) => {
+                let last_block: &[u8] = last_block_encoded.to_utf8().unwrap().as_bytes();
+                let mut last_block_nr_encoded = &last_block[32..];
+                let last_block_nr = SidechainBlockNumber::decode(&mut last_block_nr_encoded).unwrap();
+                let last_block_hash = <[u8; 32]>::try_from(&last_block[..32]).unwrap();
+                (last_block_hash, last_block_nr)
+            },
+            Ok(None) => {
+                let last_block_nr: SidechainBlockNumber = 0;
+                let last_block_hash: [u8; 32] = Default::default();
+                (last_block_hash, last_block_nr)
+            },
+            Err(e) => {
+                error!("operational problem encountered: {}", e);
+                return sgx_status_t::SGX_ERROR_UNEXPECTED;
+            },
+        };
+
+        for signed_block in signed_blocks.into_iter() {
+            // Block hash -> Signed Block
+            let block_hash = signed_block.hash();
+            batch.put(&block_hash, &signed_block.encode().as_slice());
+            // Block number -> Blockhash (for block pruning)
+            let block_nr = signed_block.block().block_number();
+            batch.put(&block_nr.encode().as_slice(), &block_hash);
+
+            // Last sidechainblockhash -> (Blockhash ,BlockNr) current blockchain state
+            last_block_hash = block_hash;
+            last_block_nr = block_nr;
+        }
+        db.write(batch);
+        db.put(&LAST_BLOCK_KEY_VALUE, [&last_block_hash, last_block_nr.encode()]);
+
+        db.put(b"my key", b"my value").unwrap();
+        match db.get(b"my key") {
+            Ok(Some(value)) => println!("retrieved value {}", value.to_utf8().unwrap()),
+            Ok(None) => println!("value not found"),
+            Err(e) => println!("operational problem encountered: {}", e),
+        }
+        db.delete(b"my key").unwrap();
+    }
     // TODO: M8.3: broadcast blocks
     status
 }

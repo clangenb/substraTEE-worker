@@ -11,10 +11,11 @@ use std::vec::Vec;
 // but block.rs should be available in std?
 //use sgx_runtime::BlockNumber;
 use sp_core::crypto::{AccountId32, Pair};
-use sp_core::{ed25519, H256};
+use sp_core::{ed25519, H256, hashing};
 use sp_runtime::{traits::Verify, MultiSignature};
 
 pub type Signature = MultiSignature;
+pub type SidechainBlockNumber = BlockNumber;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(feature = "sgx")]
@@ -67,7 +68,7 @@ impl StatePayload {
 #[derive(PartialEq, Eq, Clone, Encode, Decode, Debug)]
 #[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
 pub struct Block {
-    block_number: BlockNumber,
+    block_number: SidechainBlockNumber,
     parent_hash: H256,
     timestamp: i64,
     /// hash of the last header of block in layer one
@@ -157,6 +158,11 @@ impl SignedBlock {
     /// get signature reference
     pub fn signature(&self) -> &Signature {
         &self.signature
+    }
+
+    /// get block hash (blake2_256)
+    pub fn hash(&self) -> [u8; 32] {
+        hashing::blake2_256(&mut self.block.encode().as_slice())
     }
 
     /// Verifes the signature of a Block

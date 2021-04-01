@@ -51,6 +51,7 @@ bin/attestation_report.json
 bin/shards
 bin/*.der
 bin/enclave-shielding-pubkey.json
+bin/sidechainblock_db
 
 # in order to have 2 workers run and exchange keys
 bin2/substratee-worker
