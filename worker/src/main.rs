@@ -64,7 +64,7 @@ use substratee_worker_primitives::block::{
 use std::convert::TryFrom;
 
 
-use parity_rocksdb::rocksdb::{DB, Writable, WriteBatch};
+use rocksdb::{DB, WriteBatch};
 
 mod constants;
 mod enclave;
@@ -786,11 +786,9 @@ pub unsafe extern "C" fn ocall_worker_request(
     sgx_status_t::SGX_SUCCESS
 }
 
-
-
 /// Contains the blocknumber and blokhash of the
 /// last sidechain block
-#[derive(PartialEq, Eq, Clone, Encode, Decode, Debug)]
+#[derive(PartialEq, Eq, Clone, Encode, Decode, Debug, Default)]
 pub struct LastSidechainBlock {
     /// hash of the last sidechain block
     hash: H256,
@@ -857,30 +855,9 @@ pub unsafe extern "C" fn ocall_send_block_and_confirmation(
     // TODO: M8.3: Store blocks
     // FIXME: Error handling?
     if !signed_blocks.is_empty() {
-        let mut batch = WriteBatch::new();
+        let mut batch = WriteBatch::default();
         let mut db = DB::open_default("../bin/sidechainblock_db").unwrap();
-        // is this really necessary?
-        // FIXME: use LastSidechainBlock struct instead.
-        // FIXME: which database should be used?
-        let (mut last_block_hash, mut last_block_nr) = match db.get(LAST_BLOCK_KEY_VALUE) {
-            Ok(Some(last_block_encoded)) => {
-                let last_block: &[u8] = last_block_encoded.to_utf8().unwrap().as_bytes();
-                let mut last_block_nr_encoded = &last_block[32..];
-                let last_block_nr = SidechainBlockNumber::decode(&mut last_block_nr_encoded).unwrap();
-                let last_block_hash = <[u8; 32]>::try_from(&last_block[..32]).unwrap();
-                (last_block_hash, last_block_nr)
-            },
-            Ok(None) => {
-                let last_block_nr: SidechainBlockNumber = 0;
-                let last_block_hash: [u8; 32] = Default::default();
-                (last_block_hash, last_block_nr)
-            },
-            Err(e) => {
-                error!("operational problem encountered: {}", e);
-                return sgx_status_t::SGX_ERROR_UNEXPECTED;
-            },
-        };
-
+        let mut last_sidechain_block = LastSidechainBlock::default();
         for signed_block in signed_blocks.into_iter() {
             // Block hash -> Signed Block
             let block_hash = signed_block.hash();
@@ -890,15 +867,17 @@ pub unsafe extern "C" fn ocall_send_block_and_confirmation(
             batch.put(&block_nr.encode().as_slice(), &block_hash);
 
             // Last sidechainblockhash -> (Blockhash ,BlockNr) current blockchain state
-            last_block_hash = block_hash;
-            last_block_nr = block_nr;
+            last_sidechain_block.hash = block_hash.into();
+            last_sidechain_block.number = block_nr;
         }
         db.write(batch);
-        db.put(&LAST_BLOCK_KEY_VALUE, [&last_block_hash, last_block_nr.encode()]);
+        db.put(&LAST_BLOCK_KEY_VALUE, last_sidechain_block.encode());
 
-        db.put(b"my key", b"my value").unwrap();
-        match db.get(b"my key") {
-            Ok(Some(value)) => println!("retrieved value {}", value.to_utf8().unwrap()),
+        match db.get(LAST_BLOCK_KEY_VALUE) {
+            Ok(Some(encoded_last_block)) => {
+                let last_block = LastSidechainBlock::decode(&mut encoded_last_block.as_slice()).unwrap();
+                println!("retrieved value {:?}", last_block);
+            },
             Ok(None) => println!("value not found"),
             Err(e) => println!("operational problem encountered: {}", e),
         }
