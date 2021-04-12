@@ -856,7 +856,7 @@ pub unsafe extern "C" fn ocall_send_block_and_confirmation(
     // FIXME: Error handling?
     if !signed_blocks.is_empty() {
         let mut batch = WriteBatch::default();
-        let mut db = DB::open_default("../bin/sidechainblock_db").unwrap();
+        let db = DB::open_default("../bin/sidechainblock_db").unwrap();
         let mut last_sidechain_block = LastSidechainBlock::default();
         for signed_block in signed_blocks.into_iter() {
             // Block hash -> Signed Block
@@ -870,8 +870,12 @@ pub unsafe extern "C" fn ocall_send_block_and_confirmation(
             last_sidechain_block.hash = block_hash.into();
             last_sidechain_block.number = block_nr;
         }
-        db.write(batch);
-        db.put(&LAST_BLOCK_KEY_VALUE, last_sidechain_block.encode());
+        if let Err(e) = db.write(batch) {
+            error!("Could not write batch to sidechain db due to {}", e);
+        };
+        if let Err(e) = db.put(&LAST_BLOCK_KEY_VALUE, last_sidechain_block.encode()) {
+            error!("Could not write last block to sidechain db due to {}", e);
+        };
 
         match db.get(LAST_BLOCK_KEY_VALUE) {
             Ok(Some(encoded_last_block)) => {
@@ -881,7 +885,6 @@ pub unsafe extern "C" fn ocall_send_block_and_confirmation(
             Ok(None) => println!("value not found"),
             Err(e) => println!("operational problem encountered: {}", e),
         }
-        db.delete(b"my key").unwrap();
     }
     // TODO: M8.3: broadcast blocks
     status
