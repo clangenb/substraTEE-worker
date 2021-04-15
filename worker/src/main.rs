@@ -25,6 +25,7 @@ use std::sync::{
     Mutex,
 };
 use std::thread;
+use std::collections::HashMap;
 
 use sgx_types::*;
 
@@ -57,12 +58,9 @@ use sp_finality_grandpa::{AuthorityList, VersionedAuthorityList, GRANDPA_AUTHORI
 use std::time::{Duration, SystemTime};
 
 use substratee_worker_primitives::block::{
-    Block as SidechainBlock, SignedBlock as SignedSidechainBlock, StatePayload,
+    SignedBlock as SignedSidechainBlock,
     SidechainBlockNumber
 };
-
-use std::convert::TryFrom;
-
 
 use rocksdb::{DB, WriteBatch};
 
@@ -78,7 +76,9 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 const BLOCK_PRODUCTION_INTERVAL: u64 = 1000;
 
 /// key value of sidechain db of last block
-const LAST_BLOCK_KEY_VALUE: &[u8] = b"last_sidechainblock";
+const LAST_BLOCK_KEY: &[u8] = b"last_sidechainblock";
+/// key value of the stored shards vector
+const STORED_SHARDS_KEY: &[u8] = b"stored_shards";
 
 fn main() {
     // Setup logging
@@ -852,35 +852,73 @@ pub unsafe extern "C" fn ocall_send_block_and_confirmation(
     };
     println! {"Received blocks: {:?}", signed_blocks};
 
-    // TODO: M8.3: Store blocks
-    // FIXME: Error handling?
+    // Store sidechain blocks
     if !signed_blocks.is_empty() {
         let mut batch = WriteBatch::default();
         let db = DB::open_default("../bin/sidechainblock_db").unwrap();
-        let mut last_sidechain_block = LastSidechainBlock::default();
+        // store last sidechain block of every shard
+        let mut map_to_last_sidechain_block: HashMap<ShardIdentifier, LastSidechainBlock> = HashMap::new();
+        //FIXME: Proper error handling !
+        let mut currently_stored_shards: Vec<ShardIdentifier> = match db.get(STORED_SHARDS_KEY) {
+            Ok(Some(shards)) => {
+                Decode::decode(&mut shards.as_slice()).unwrap()
+            },
+            Ok(None) => {
+                println!("value not found");
+                vec![]
+            },
+            Err(e) => {
+                println!("operational problem encountered: {}", e);
+                vec![]
+            },
+        };
+        let mut new_shard = false;
         for signed_block in signed_blocks.into_iter() {
             // Block hash -> Signed Block
             let block_hash = signed_block.hash();
             batch.put(&block_hash, &signed_block.encode().as_slice());
-            // Block number -> Blockhash (for block pruning)
+            // (Shard, Block number) -> Blockhash (for block pruning)
+            let block_shard = signed_block.block().shard_id();
             let block_nr = signed_block.block().block_number();
-            batch.put(&block_nr.encode().as_slice(), &block_hash);
-
-            // Last sidechainblockhash -> (Blockhash ,BlockNr) current blockchain state
-            last_sidechain_block.hash = block_hash.into();
-            last_sidechain_block.number = block_nr;
+            batch.put(&(block_shard, block_nr).encode().as_slice(), &block_hash);
+            // (last_block_key, shard) -> (Blockhash, BlockNr) current blockchain state
+            let current_last_block = LastSidechainBlock{
+                hash: block_hash.into(),
+                number: block_nr,
+            };
+            map_to_last_sidechain_block.insert(block_shard, current_last_block);
+            // stored_shards_key -> vec<shard>
+            if !currently_stored_shards.contains(&block_shard) {
+                currently_stored_shards.push(block_shard);
+                new_shard = true;
+            }
+        }
+        if new_shard {
+            batch.put(STORED_SHARDS_KEY, currently_stored_shards.encode());
         }
         if let Err(e) = db.write(batch) {
             error!("Could not write batch to sidechain db due to {}", e);
         };
-        if let Err(e) = db.put(&LAST_BLOCK_KEY_VALUE, last_sidechain_block.encode()) {
-            error!("Could not write last block to sidechain db due to {}", e);
-        };
-
-        match db.get(LAST_BLOCK_KEY_VALUE) {
-            Ok(Some(encoded_last_block)) => {
-                let last_block = LastSidechainBlock::decode(&mut encoded_last_block.as_slice()).unwrap();
-                println!("retrieved value {:?}", last_block);
+        // update last blocks
+        for (shard, last_block) in map_to_last_sidechain_block.iter() {
+            if let Err(e) = db.put((LAST_BLOCK_KEY, shard).encode(), last_block.encode()) {
+                error!("Could not write last block to sidechain db due to {}", e);
+            };
+        }
+        match db.get(STORED_SHARDS_KEY) {
+            Ok(Some(encoded_shards)) => {
+                let shards: Vec<ShardIdentifier> = Decode::decode(&mut encoded_shards.as_slice()).unwrap();
+                println!("retrieved shards {:?}", shards);
+                for shard in shards {
+                    match db.get((LAST_BLOCK_KEY, shard).encode()) {
+                        Ok(Some(encoded_last_block)) => {
+                            let last_block = LastSidechainBlock::decode(&mut encoded_last_block.as_slice()).unwrap();
+                            println!("retrieved value {:?}", last_block);
+                        },
+                        Ok(None) => println!("value not found"),
+                        Err(e) => println!("operational problem encountered: {}", e),
+                    }
+                }
             },
             Ok(None) => println!("value not found"),
             Err(e) => println!("operational problem encountered: {}", e),
