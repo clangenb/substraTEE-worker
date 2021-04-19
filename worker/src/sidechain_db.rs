@@ -101,7 +101,7 @@ impl SidechainDB {
     }
 
     /// update sidechain storage
-    pub fn update_db(&self) -> Result<(), DBError> {
+    pub fn update_db(&mut self) -> Result<(), DBError> {
         // Store sidechain blocks
         if !self.signed_blocks.is_empty() {
             let mut batch = WriteBatch::default();

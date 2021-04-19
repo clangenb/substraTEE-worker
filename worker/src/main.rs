@@ -829,9 +829,11 @@ pub unsafe extern "C" fn ocall_send_block_and_confirmation(
     }
 
     // handle blocks
-    if let Ok(sidechain_db) = SidechainDB::new_from_encoded(signed_blocks_slice) {
+    if let Ok(mut sidechain_db) = SidechainDB::new_from_encoded(signed_blocks_slice) {
         println! {"Received blocks: {:?}", sidechain_db.signed_blocks};
-        sidechain_db.update_db();
+        if let Err(_) = sidechain_db.update_db() {
+            status = sgx_status_t::SGX_ERROR_UNEXPECTED;
+        };
     }
 
     // TODO: M8.3: broadcast blocks
