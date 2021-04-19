@@ -26,7 +26,9 @@ use std::sync::{
     Mutex,
 };
 use std::collections::HashMap;
-
+use my_node_runtime::{
+    substratee_registry::ShardIdentifier, Event, Hash, Header, SignedBlock, UncheckedExtrinsic,
+};
 
 use sgx_types::*;
 use codec::{Decode, Encode};
@@ -55,14 +57,14 @@ const LAST_BLOCK_KEY: &[u8] = b"last_sidechainblock";
 const STORED_SHARDS_KEY: &[u8] = b"stored_shards";
 
 /// DB errors.
-#[derive(Debug, Display, From)]
+#[derive(Debug)]
 pub enum DBError {
     /// Unexpected empty key-value pair
-    UnexpectedEmpty(key: Vec<u8>),
-
-    // RocksDB Error
-    OperationalError(msg: String),
-
+    UnexpectedEmpty(Vec<u8>),
+    /// RocksDB Error
+    OperationalError(String),
+    /// Decoding Error
+    DecodeError,
 }
 
 /// Contains the blocknumber and blokhash of the
@@ -76,25 +78,26 @@ pub struct LastSidechainBlock {
 }
 
 pub struct SidechainDB {
-    // newly produced sidechain blocks
-    pub signed_blocks: Vec<SignedSidechainBlock>
+    ///  newly produced sidechain blocks
+    pub signed_blocks: Vec<SignedSidechainBlock>,
+    /// map to last sidechain block of every shard
+    pub last_sidechain_blocks: HashMap<ShardIdentifier, LastSidechainBlock>,
 }
 
 impl SidechainDB {
     pub fn new(signed_blocks: Vec<SignedSidechainBlock>) -> SidechainDB {
-        SidechainDB {signed_blocks}
+        SidechainDB {signed_blocks, last_sidechain_blocks: HashMap::new()}
     }
 
-    pub fn new_from_encoded(encoded_signed_blocks: &[u8]) -> SidechainDB {
-        let signed_blocks: Vec<SignedSidechainBlock> = match Decode::decode(&mut signed_blocks_slice) {
+    pub fn new_from_encoded(mut encoded_signed_blocks: &[u8]) -> Result<SidechainDB, DBError> {
+        let signed_blocks: Vec<SignedSidechainBlock> = match Decode::decode(&mut encoded_signed_blocks) {
             Ok(blocks) => blocks,
-            Err(_) => {
-                error!("Could not decode confirmation calls");
-                status = sgx_status_t::SGX_ERROR_UNEXPECTED;
-                vec![]
+            Err(e) => {
+                error!("Could not decode confirmation calls: {:?}", e);
+                return Err(DBError::DecodeError)
             }
         };
-        SidechainDB::new(signed_blocks)
+        Ok(SidechainDB::new(signed_blocks))
     }
 
     /// update sidechain storage
@@ -103,8 +106,6 @@ impl SidechainDB {
         if !self.signed_blocks.is_empty() {
             let mut batch = WriteBatch::default();
             let db = DB::open_default("../bin/sidechainblock_db").unwrap();
-            // store last sidechain block of every shard
-            let mut map_to_last_sidechain_block: HashMap<ShardIdentifier, LastSidechainBlock> = HashMap::new();
             //FIXME: Proper error handling !
             let mut currently_stored_shards: Vec<ShardIdentifier> = match db.get(STORED_SHARDS_KEY) {
                 Ok(Some(shards)) => {
@@ -120,7 +121,7 @@ impl SidechainDB {
                 },
             };
             let mut new_shard = false;
-            for signed_block in signed_blocks.into_iter() {
+            for signed_block in self.signed_blocks.clone().into_iter() {
                 // Block hash -> Signed Block
                 let block_hash = signed_block.hash();
                 batch.put(&block_hash, &signed_block.encode().as_slice());
@@ -133,7 +134,7 @@ impl SidechainDB {
                     hash: block_hash.into(),
                     number: block_nr,
                 };
-                map_to_last_sidechain_block.insert(block_shard, current_last_block);
+                self.last_sidechain_blocks.insert(block_shard, current_last_block);
                 // stored_shards_key -> vec<shard>
                 if !currently_stored_shards.contains(&block_shard) {
                     currently_stored_shards.push(block_shard);
@@ -147,7 +148,7 @@ impl SidechainDB {
                 error!("Could not write batch to sidechain db due to {}", e);
             };
             // update last blocks
-            for (shard, last_block) in map_to_last_sidechain_block.iter() {
+            for (shard, last_block) in self.last_sidechain_blocks.iter() {
                 if let Err(e) = db.put((LAST_BLOCK_KEY, shard).encode(), last_block.encode()) {
                     error!("Could not write last block to sidechain db due to {}", e);
                 };
@@ -171,5 +172,6 @@ impl SidechainDB {
                 Err(e) => println!("operational problem encountered: {}", e),
             }
         }
+        Ok(())
     }
 }
