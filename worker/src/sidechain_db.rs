@@ -77,48 +77,77 @@ pub struct LastSidechainBlock {
 
 /// Struct used to insert newly produced sidechainblocks
 /// into the database
-pub struct NewSidechainBlocks {
-    ///  newly produced sidechain blocks
-    pub signed_blocks: Vec<SignedSidechainBlock>,
+pub struct SidechainDB {
+    /// database
+    pub db: DB,
+    /// shards in database
+    pub shards: Vec<ShardIdentifier>,
     /// map to last sidechain block of every shard
-    /// FIXME: does it make sense within struct? -> Finish broadcast before deciding
-    pub last_sidechain_blocks: HashMap<ShardIdentifier, LastSidechainBlock>,
+    pub last_blocks: HashMap<ShardIdentifier, LastSidechainBlock>,
 }
 
-impl NewSidechainBlocks {
-    pub fn new(signed_blocks: Vec<SignedSidechainBlock>) -> NewSidechainBlocks {
-        NewSidechainBlocks {signed_blocks, last_sidechain_blocks: HashMap::new()}
-    }
-
-    /// create new NewSidechainBlocks struct from encoded signed blocks
-    pub fn new_from_encoded(mut encoded_signed_blocks: &[u8]) -> Result<NewSidechainBlocks, DBError> {
-        let signed_blocks: Vec<SignedSidechainBlock> = match Decode::decode(&mut encoded_signed_blocks) {
-            Ok(blocks) => blocks,
+impl SidechainDB {
+    pub fn new() -> Result<SidechainDB, DBError> {
+        let db = DB::open_default(SIDECHAIN_DB_PATH).unwrap();
+        // get shards in db
+        let shards: Vec<ShardIdentifier> = match db.get(STORED_SHARDS_KEY) {
+            Ok(Some(shards)) => {
+                Decode::decode(&mut shards.as_slice()).unwrap()
+            },
+            Ok(None) => vec![],
             Err(e) => {
-                error!("Could not decode confirmation calls: {:?}", e);
-                return Err(DBError::DecodeError)
-            }
+                error!("Could not read shards from db: {}", e);
+                return Err(DBError::OperationalError(e));
+            },
         };
-        Ok(NewSidechainBlocks::new(signed_blocks))
-    }
-
-    /// update sidechain storage
-    pub fn update_db(&mut self) -> Result<(), DBError> {
-        if !self.signed_blocks.is_empty() {
-            let mut batch = WriteBatch::default();
-            let db = DB::open_default("../bin/sidechainblock_db").unwrap();
-            let mut currently_stored_shards: Vec<ShardIdentifier> = match db.get(STORED_SHARDS_KEY) {
-                Ok(Some(shards)) => {
-                    Decode::decode(&mut shards.as_slice()).unwrap()
+        // get last block of each shard
+        let mut last_blocks = HashMap::new();
+        for shard in shards.iter() {
+            match db.get((LAST_BLOCK_KEY, shard).encode()) {
+                Ok(Some(last_block_encoded)) => {
+                    match LastSidechainBlock::decode(&mut last_block_encoded.as_slice()) {
+                        Ok(last_block) => {
+                            last_blocks.insert(shard.clone(), last_block);
+                        },
+                        Err(e) => {
+                            error!("Could not decode signed block: {:?}", e);
+                            return Err(DBError::DecodeError)
+                        }
+                    }
                 },
-                Ok(None) => vec![],
+                Ok(None) => { },
                 Err(e) => {
                     error!("Could not read shards from db: {}", e);
                     return Err(DBError::OperationalError(e));
-                },
-            };
+                }
+            }
+        }
+        Ok(SidechainDB {
+            db,
+            shards,
+            last_blocks,
+        })
+    }
+
+    /// create new SidechainDB struct from encoded signed blocks
+    pub fn update_db_from_encoded(&mut self, mut encoded_signed_blocks: &[u8]) -> Result<(), DBError> {
+        let signed_blocks: Vec<SignedSidechainBlock> = match Decode::decode(&mut encoded_signed_blocks) {
+            Ok(blocks) => blocks,
+            Err(e) => {
+                error!("Could not decode signed blocks: {:?}", e);
+                return Err(DBError::DecodeError)
+            }
+        };
+        self.update_db(signed_blocks)
+    }
+
+    /// update sidechain storage
+    pub fn update_db(&mut self, blocks_to_store: Vec<SignedSidechainBlock>) -> Result<(), DBError> {
+        println!{"Received blocks: {:?}", blocks_to_store};
+        if !blocks_to_store.is_empty() {
+            let mut batch = WriteBatch::default();
             let mut new_shard = false;
-            for signed_block in self.signed_blocks.clone().into_iter() {
+            for signed_block in blocks_to_store.clone().into_iter() {
                 // Block hash -> Signed Block
                 let block_hash = signed_block.hash();
                 batch.put(&block_hash, &signed_block.encode().as_slice());
@@ -131,24 +160,24 @@ impl NewSidechainBlocks {
                     hash: block_hash.into(),
                     number: block_nr,
                 };
-                self.last_sidechain_blocks.insert(block_shard, current_last_block);
+                self.last_blocks.insert(block_shard, current_last_block);
                 // stored_shards_key -> vec<shard>
-                if !currently_stored_shards.contains(&block_shard) {
-                    currently_stored_shards.push(block_shard);
+                if !self.shards.contains(&block_shard) {
+                    self.shards.push(block_shard);
                     new_shard = true;
                 }
             }
             // update stored_shards_key -> vec<shard>
             if new_shard {
-                batch.put(STORED_SHARDS_KEY, currently_stored_shards.encode());
+                batch.put(STORED_SHARDS_KEY, self.shards.encode());
             }
-            if let Err(e) = db.write(batch) {
+            if let Err(e) = self.db.write(batch) {
                 error!("Could not write batch to sidechain db due to {}", e);
                 return Err(DBError::OperationalError(e));
             };
             // update last blocks ((last_block_key, shard) -> (Blockhash, BlockNr))
-            for (shard, last_block) in self.last_sidechain_blocks.iter() {
-                if let Err(e) = db.put((LAST_BLOCK_KEY, shard).encode(), last_block.encode()) {
+            for (shard, last_block) in self.last_blocks.iter() {
+                if let Err(e) = self.db.put((LAST_BLOCK_KEY, shard).encode(), last_block.encode()) {
                     error!("Could not write last block to sidechain db due to {}", e);
                     return Err(DBError::OperationalError(e));
                 };
@@ -167,8 +196,8 @@ mod tests {
     use substratee_worker_primitives::block::{Block, Signature};
 
 
-    #[test]
-    fn creating_sidechain_db_from_encoded_works() {
+    /* #[test]
+    fn create_new_sidechain_struct_works() {
         // given
         let signed_block_one = create_signed_block(20, H256::random());
         let signed_block_two = create_signed_block(1, H256::random());
@@ -184,13 +213,39 @@ mod tests {
         };
 
         // when
-        let sidechain_db = NewSidechainBlocks::new_from_encoded(signed_blocks_slice).unwrap();
+        let sidechain_db = SidechainDB::new().unwrap();
 
         // then
-        assert_eq!(sidechain_db.signed_blocks[0], signed_block_one);
-        assert_eq!(sidechain_db.signed_blocks[1], signed_block_two);
-    }
+        assert_eq!(sidechain_db.blocks_to_store[0], signed_block_one);
+        assert_eq!(sidechain_db.blocks_to_store[1], signed_block_two);
+    } */
 
+    /*#[test]
+    fn update_db_works() {
+        // given
+        let shard_one = H256::random();
+        let shard_two = H256::random();
+        let signed_block_one = create_signed_block(20, shard_one);
+        let signed_block_two = create_signed_block(1, shard_two);
+
+        let mut signed_block_vector: Vec<SignedSidechainBlock> = vec![];
+        signed_block_vector.push(signed_block_one.clone());
+        signed_block_vector.push(signed_block_two.clone());
+
+        // encode blocks to slice [u8]
+        let encoded_blocks = signed_block_vector.encode();
+        let signed_blocks_slice = unsafe {
+            slice::from_raw_parts(encoded_blocks.as_ptr(), encoded_blocks.len() as usize)
+        };
+        let sidechain_db = SidechainDB::new_from_encoded(signed_blocks_slice).unwrap();
+
+        // when
+
+        // then
+        assert_eq!(sidechain_db.block_to_store[0], signed_block_one);
+        assert_eq!(sidechain_db.block_to_store[1], signed_block_two);
+    }
+ */
     fn create_signed_block(block_number: u64, shard: ShardIdentifier) -> SignedSidechainBlock {
         let signer_pair = ed25519::Pair::from_string("//Alice", None).unwrap();
         let author: AccountId32 = signer_pair.public().into();
