@@ -682,9 +682,7 @@ pub fn compose_block_and_confirmation(
         Some(number) => number + 1,
         None => return Err(sgx_status_t::SGX_ERROR_UNEXPECTED),
     };
-    Stf::update_sidechain_block_number(state, block_number);
 
-    let block_number: u64 = block_number; //FIXME! Should be either u64 or u32! Not both..
     let parent_hash = match Stf::get_last_block_hash(state) {
         Some(hash) => hash,
         None => return Err(sgx_status_t::SGX_ERROR_UNEXPECTED),
@@ -717,6 +715,8 @@ pub fn compose_block_and_confirmation(
     let xt_block = [SUBSRATEE_REGISTRY_MODULE, BLOCK_CONFIRMED];
     let opaque_call =
         OpaqueCall((xt_block, shard, block_hash, state_hash_aposteriori.encode()).encode());
+
+    Stf::update_sidechain_block_number(state, block_number);
     Ok((opaque_call, signed_block))
 }
 
