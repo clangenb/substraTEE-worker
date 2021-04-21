@@ -77,7 +77,7 @@ pub struct LastSidechainBlock {
 
 /// Struct used to insert newly produced sidechainblocks
 /// into the database
-pub struct SidechainDB {
+pub struct NewSidechainBlocks {
     ///  newly produced sidechain blocks
     pub signed_blocks: Vec<SignedSidechainBlock>,
     /// map to last sidechain block of every shard
@@ -85,13 +85,13 @@ pub struct SidechainDB {
     pub last_sidechain_blocks: HashMap<ShardIdentifier, LastSidechainBlock>,
 }
 
-impl SidechainDB {
-    pub fn new(signed_blocks: Vec<SignedSidechainBlock>) -> SidechainDB {
-        SidechainDB {signed_blocks, last_sidechain_blocks: HashMap::new()}
+impl NewSidechainBlocks {
+    pub fn new(signed_blocks: Vec<SignedSidechainBlock>) -> NewSidechainBlocks {
+        NewSidechainBlocks {signed_blocks, last_sidechain_blocks: HashMap::new()}
     }
 
-    /// create new SidechainDB struct from encoded signed blocks
-    pub fn new_from_encoded(mut encoded_signed_blocks: &[u8]) -> Result<SidechainDB, DBError> {
+    /// create new NewSidechainBlocks struct from encoded signed blocks
+    pub fn new_from_encoded(mut encoded_signed_blocks: &[u8]) -> Result<NewSidechainBlocks, DBError> {
         let signed_blocks: Vec<SignedSidechainBlock> = match Decode::decode(&mut encoded_signed_blocks) {
             Ok(blocks) => blocks,
             Err(e) => {
@@ -99,7 +99,7 @@ impl SidechainDB {
                 return Err(DBError::DecodeError)
             }
         };
-        Ok(SidechainDB::new(signed_blocks))
+        Ok(NewSidechainBlocks::new(signed_blocks))
     }
 
     /// update sidechain storage
@@ -155,5 +155,59 @@ impl SidechainDB {
             }
         }
         Ok(())
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sp_core::crypto::{AccountId32, Pair};
+    use sp_core::{ed25519, H256, hashing};
+    use substratee_worker_primitives::block::{Block, Signature};
+
+
+    #[test]
+    fn creating_sidechain_db_from_encoded_works() {
+        // given
+        let signed_block_one = create_signed_block(20, H256::random());
+        let signed_block_two = create_signed_block(1, H256::random());
+
+        let mut signed_block_vector: Vec<SignedSidechainBlock> = vec![];
+        signed_block_vector.push(signed_block_one.clone());
+        signed_block_vector.push(signed_block_two.clone());
+
+        // encode blocks to slice [u8]
+        let encoded_blocks = signed_block_vector.encode();
+        let signed_blocks_slice = unsafe {
+            slice::from_raw_parts(encoded_blocks.as_ptr(), encoded_blocks.len() as usize)
+        };
+
+        // when
+        let sidechain_db = NewSidechainBlocks::new_from_encoded(signed_blocks_slice).unwrap();
+
+        // then
+        assert_eq!(sidechain_db.signed_blocks[0], signed_block_one);
+        assert_eq!(sidechain_db.signed_blocks[1], signed_block_two);
+    }
+
+    fn create_signed_block(block_number: u64, shard: ShardIdentifier) -> SignedSidechainBlock {
+        let signer_pair = ed25519::Pair::from_string("//Alice", None).unwrap();
+        let author: AccountId32 = signer_pair.public().into();
+        let parent_hash = H256::random();
+        let layer_one_head = H256::random();
+        let signed_top_hashes = vec![];
+        let encrypted_payload: Vec<u8> = vec![];
+
+        let block = Block::construct_block(
+            author,
+            block_number,
+            parent_hash.clone(),
+            layer_one_head.clone(),
+            shard.clone(),
+            signed_top_hashes.clone(),
+            encrypted_payload.clone(),
+        );
+        block.sign(&signer_pair)
     }
 }

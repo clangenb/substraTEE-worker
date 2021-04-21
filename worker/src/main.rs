@@ -68,7 +68,7 @@ mod ipfs;
 mod tests;
 mod sidechain_db;
 
-use sidechain_db::SidechainDB;
+use sidechain_db::NewSidechainBlocks;
 /// how many blocks will be synced before storing the chain db to disk
 const BLOCK_SYNC_BATCH_SIZE: u32 = 1000;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -829,7 +829,7 @@ pub unsafe extern "C" fn ocall_send_block_and_confirmation(
     }
 
     // handle blocks
-    if let Ok(mut sidechain_db) = SidechainDB::new_from_encoded(signed_blocks_slice) {
+    if let Ok(mut sidechain_db) = NewSidechainBlocks::new_from_encoded(signed_blocks_slice) {
         println!{"Received blocks: {:?}", sidechain_db.signed_blocks};
         if let Err(_) = sidechain_db.update_db() {
             status = sgx_status_t::SGX_ERROR_UNEXPECTED;
