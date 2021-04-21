@@ -61,6 +61,8 @@ const STORED_SHARDS_KEY: &[u8] = b"stored_shards";
 pub enum DBError {
     /// RocksDB Error
     OperationalError(rocksdb::Error),
+    /// Blocknumber Succession error
+    InvalidBlockNumberSuccession(SignedSidechainBlock),
     /// Decoding Error
     DecodeError,
 }
@@ -129,7 +131,7 @@ impl SidechainDB {
         })
     }
 
-    /// create new SidechainDB struct from encoded signed blocks
+    /// update sidechain storage from decoded signed blocks
     pub fn update_db_from_encoded(&mut self, mut encoded_signed_blocks: &[u8]) -> Result<(), DBError> {
         let signed_blocks: Vec<SignedSidechainBlock> = match Decode::decode(&mut encoded_signed_blocks) {
             Ok(blocks) => blocks,
@@ -141,48 +143,48 @@ impl SidechainDB {
         self.update_db(signed_blocks)
     }
 
+
     /// update sidechain storage
     pub fn update_db(&mut self, blocks_to_store: Vec<SignedSidechainBlock>) -> Result<(), DBError> {
         println!{"Received blocks: {:?}", blocks_to_store};
-        if !blocks_to_store.is_empty() {
-            let mut batch = WriteBatch::default();
-            let mut new_shard = false;
-            for signed_block in blocks_to_store.clone().into_iter() {
-                // Block hash -> Signed Block
-                let block_hash = signed_block.hash();
-                batch.put(&block_hash, &signed_block.encode().as_slice());
-                // (Shard, Block number) -> Blockhash (for block pruning)
-                let block_shard = signed_block.block().shard_id();
-                let block_nr = signed_block.block().block_number();
-                batch.put(&(block_shard, block_nr).encode().as_slice(), &block_hash);
-                // (last_block_key, shard) -> (Blockhash, BlockNr) current blockchain state
-                let current_last_block = LastSidechainBlock{
-                    hash: block_hash.into(),
-                    number: block_nr,
-                };
-                self.last_blocks.insert(block_shard, current_last_block);
-                // stored_shards_key -> vec<shard>
-                if !self.shards.contains(&block_shard) {
-                    self.shards.push(block_shard);
-                    new_shard = true;
+        let mut batch = WriteBatch::default();
+        let mut new_shard = false;
+        for signed_block in blocks_to_store.clone().into_iter() {
+            // check if current block is the next in line
+            let current_block_shard = signed_block.block().shard_id();
+            let current_block_nr = signed_block.block().block_number();
+            if self.shards.contains(&current_block_shard) {
+                let last_block: &LastSidechainBlock = self.last_blocks.get(&current_block_shard).unwrap();
+                if last_block.number != current_block_nr - 1 {
+                    error!("The to be included sidechainblock number {:?} is not a follow up of the last sidechain block in the db: {:?}",
+                    current_block_nr, last_block.number);
+                    return Err(DBError::InvalidBlockNumberSuccession(signed_block));
                 }
+            } else {
+                self.shards.push(current_block_shard);
+                new_shard = true;
             }
-            // update stored_shards_key -> vec<shard>
-            if new_shard {
-                batch.put(STORED_SHARDS_KEY, self.shards.encode());
-            }
-            if let Err(e) = self.db.write(batch) {
-                error!("Could not write batch to sidechain db due to {}", e);
-                return Err(DBError::OperationalError(e));
+
+            // Block hash -> Signed Block
+            let current_block_hash = signed_block.hash();
+            batch.put(&current_block_hash, &signed_block.encode().as_slice());
+            // (Shard, Block number) -> Blockhash (for block pruning)
+            batch.put(&(current_block_shard, current_block_nr).encode().as_slice(), &current_block_hash);
+            // (last_block_key, shard) -> (Blockhash, BlockNr) current blockchain state
+            let current_last_block = LastSidechainBlock{
+                hash: current_block_hash.into(),
+                number: current_block_nr,
             };
-            // update last blocks ((last_block_key, shard) -> (Blockhash, BlockNr))
-            for (shard, last_block) in self.last_blocks.iter() {
-                if let Err(e) = self.db.put((LAST_BLOCK_KEY, shard).encode(), last_block.encode()) {
-                    error!("Could not write last block to sidechain db due to {}", e);
-                    return Err(DBError::OperationalError(e));
-                };
-            }
+            batch.put((LAST_BLOCK_KEY, current_block_shard).encode(), current_last_block.encode());
         }
+        // update stored_shards_key -> vec<shard> only when a new shard was included
+        if new_shard {
+            batch.put(STORED_SHARDS_KEY, self.shards.encode());
+        }
+        if let Err(e) = self.db.write(batch) {
+            error!("Could not write batch to sidechain db due to {}", e);
+            return Err(DBError::OperationalError(e));
+        };
         Ok(())
     }
 }
