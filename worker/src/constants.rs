@@ -22,6 +22,9 @@ pub static ENCLAVE_FILE: &str = "../bin/enclave.signed.so";
 pub static SHIELDING_KEY_FILE: &str = "enclave-shielding-pubkey.json";
 pub static SIGNING_KEY_FILE: &str = "enclave-signing-pubkey.bin";
 
+/// sidechain database path
+pub static SIDECHAIN_DB_PATH: &str = "../bin/sidechainblock_db";
+
 #[cfg(feature = "production")]
 pub static RA_SPID_FILE: &str = "../bin/spid_production.txt";
 #[cfg(feature = "production")]

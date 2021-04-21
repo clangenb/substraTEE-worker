@@ -829,7 +829,7 @@ pub unsafe extern "C" fn ocall_send_block_and_confirmation(
     }
 
     // handle blocks
-    if let Ok(mut sidechain_db) = SidechainDB::new() {
+    if let Ok(mut sidechain_db) = SidechainDB::new(constants::SIDECHAIN_DB_PATH) {
         if let Err(_) = sidechain_db.update_db_from_encoded(signed_blocks_slice) {
             status = sgx_status_t::SGX_ERROR_UNEXPECTED;
         };

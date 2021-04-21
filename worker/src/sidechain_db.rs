@@ -48,9 +48,6 @@ use substratee_worker_primitives::block::{
 
 use rocksdb::{DB, WriteBatch};
 
-
-/// sidechain database path
-const SIDECHAIN_DB_PATH: &str = "../bin/sidechainblock_db";
 /// key value of sidechain db of last block
 const LAST_BLOCK_KEY: &[u8] = b"last_sidechainblock";
 /// key value of the stored shards vector
@@ -89,8 +86,8 @@ pub struct SidechainDB {
 }
 
 impl SidechainDB {
-    pub fn new() -> Result<SidechainDB, DBError> {
-        let db = DB::open_default(SIDECHAIN_DB_PATH).unwrap();
+    pub fn new(path: &str) -> Result<SidechainDB, DBError> {
+        let db = DB::open_default(path).unwrap();
         // get shards in db
         let shards: Vec<ShardIdentifier> = match db.get(STORED_SHARDS_KEY) {
             Ok(Some(shards)) => {
@@ -156,7 +153,7 @@ impl SidechainDB {
             if self.shards.contains(&current_block_shard) {
                 let last_block: &LastSidechainBlock = self.last_blocks.get(&current_block_shard).unwrap();
                 if last_block.number != current_block_nr - 1 {
-                    error!("The to be included sidechainblock number {:?} is not a follow up of the last sidechain block in the db: {:?}",
+                    error!("The to be included sidechainblock number {:?} is not a succession of the last sidechain block in the db: {:?}",
                     current_block_nr, last_block.number);
                     return Err(DBError::InvalidBlockNumberSuccession(signed_block));
                 }
@@ -198,35 +195,11 @@ mod tests {
     use substratee_worker_primitives::block::{Block, Signature};
 
 
-    /* #[test]
-    fn create_new_sidechain_struct_works() {
+    #[test]
+    fn update_db_from_encoded_works() {
         // given
-        let signed_block_one = create_signed_block(20, H256::random());
-        let signed_block_two = create_signed_block(1, H256::random());
-
-        let mut signed_block_vector: Vec<SignedSidechainBlock> = vec![];
-        signed_block_vector.push(signed_block_one.clone());
-        signed_block_vector.push(signed_block_two.clone());
-
-        // encode blocks to slice [u8]
-        let encoded_blocks = signed_block_vector.encode();
-        let signed_blocks_slice = unsafe {
-            slice::from_raw_parts(encoded_blocks.as_ptr(), encoded_blocks.len() as usize)
-        };
-
-        // when
-        let sidechain_db = SidechainDB::new().unwrap();
-
-        // then
-        assert_eq!(sidechain_db.blocks_to_store[0], signed_block_one);
-        assert_eq!(sidechain_db.blocks_to_store[1], signed_block_two);
-    } */
-
-    /*#[test]
-    fn update_db_works() {
-        // given
-        let shard_one = H256::random();
-        let shard_two = H256::random();
+        let shard_one = H256::from_low_u64_be(1);
+        let shard_two = H256::from_low_u64_be(2);
         let signed_block_one = create_signed_block(20, shard_one);
         let signed_block_two = create_signed_block(1, shard_two);
 
@@ -239,15 +212,27 @@ mod tests {
         let signed_blocks_slice = unsafe {
             slice::from_raw_parts(encoded_blocks.as_ptr(), encoded_blocks.len() as usize)
         };
-        let sidechain_db = SidechainDB::new_from_encoded(signed_blocks_slice).unwrap();
 
-        // when
+        //FIXME: ensure db is empty!
+        {
+            let mut sidechain_db = SidechainDB::new("../bin/test_db").unwrap();
+
+            // when
+            sidechain_db.update_db_from_encoded(signed_blocks_slice).unwrap();
+        }
 
         // then
-        assert_eq!(sidechain_db.block_to_store[0], signed_block_one);
-        assert_eq!(sidechain_db.block_to_store[1], signed_block_two);
+        let updated_sidechain_db = SidechainDB::new("../bin/test_db").unwrap();
+        assert_eq!(updated_sidechain_db.shards[0], shard_one);
+        assert_eq!(updated_sidechain_db.shards[1], shard_two);
+        let last_block_one: &LastSidechainBlock = updated_sidechain_db.last_blocks.get(&shard_one).unwrap();
+        let last_block_two: &LastSidechainBlock = updated_sidechain_db.last_blocks.get(&shard_two).unwrap();
+        assert_eq!(last_block_one.number, 20);
+        assert_eq!(last_block_two.number, 1);
+        assert_eq!(last_block_one.hash, signed_block_one.hash().into());
+        assert_eq!(last_block_two.hash, signed_block_two.hash().into());
     }
- */
+
     fn create_signed_block(block_number: u64, shard: ShardIdentifier) -> SignedSidechainBlock {
         let signer_pair = ed25519::Pair::from_string("//Alice", None).unwrap();
         let author: AccountId32 = signer_pair.public().into();
