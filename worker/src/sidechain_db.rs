@@ -59,10 +59,8 @@ const STORED_SHARDS_KEY: &[u8] = b"stored_shards";
 /// DB errors.
 #[derive(Debug)]
 pub enum DBError {
-    /// Unexpected empty key-value pair
-    UnexpectedEmpty(Vec<u8>),
     /// RocksDB Error
-    OperationalError(String),
+    OperationalError(rocksdb::Error),
     /// Decoding Error
     DecodeError,
 }
@@ -77,10 +75,13 @@ pub struct LastSidechainBlock {
     number: SidechainBlockNumber,
 }
 
+/// Struct used to insert newly produced sidechainblocks
+/// into the database
 pub struct SidechainDB {
     ///  newly produced sidechain blocks
     pub signed_blocks: Vec<SignedSidechainBlock>,
     /// map to last sidechain block of every shard
+    /// FIXME: does it make sense within struct? -> Finish broadcast before deciding
     pub last_sidechain_blocks: HashMap<ShardIdentifier, LastSidechainBlock>,
 }
 
@@ -89,6 +90,7 @@ impl SidechainDB {
         SidechainDB {signed_blocks, last_sidechain_blocks: HashMap::new()}
     }
 
+    /// create new SidechainDB struct from encoded signed blocks
     pub fn new_from_encoded(mut encoded_signed_blocks: &[u8]) -> Result<SidechainDB, DBError> {
         let signed_blocks: Vec<SignedSidechainBlock> = match Decode::decode(&mut encoded_signed_blocks) {
             Ok(blocks) => blocks,
@@ -102,22 +104,17 @@ impl SidechainDB {
 
     /// update sidechain storage
     pub fn update_db(&mut self) -> Result<(), DBError> {
-        // Store sidechain blocks
         if !self.signed_blocks.is_empty() {
             let mut batch = WriteBatch::default();
             let db = DB::open_default("../bin/sidechainblock_db").unwrap();
-            //FIXME: Proper error handling !
             let mut currently_stored_shards: Vec<ShardIdentifier> = match db.get(STORED_SHARDS_KEY) {
                 Ok(Some(shards)) => {
                     Decode::decode(&mut shards.as_slice()).unwrap()
                 },
-                Ok(None) => {
-                    println!("value not found");
-                    vec![]
-                },
+                Ok(None) => vec![],
                 Err(e) => {
-                    println!("operational problem encountered: {}", e);
-                    vec![]
+                    error!("Could not read shards from db: {}", e);
+                    return Err(DBError::OperationalError(e));
                 },
             };
             let mut new_shard = false;
@@ -141,35 +138,20 @@ impl SidechainDB {
                     new_shard = true;
                 }
             }
+            // update stored_shards_key -> vec<shard>
             if new_shard {
                 batch.put(STORED_SHARDS_KEY, currently_stored_shards.encode());
             }
             if let Err(e) = db.write(batch) {
                 error!("Could not write batch to sidechain db due to {}", e);
+                return Err(DBError::OperationalError(e));
             };
-            // update last blocks
+            // update last blocks ((last_block_key, shard) -> (Blockhash, BlockNr))
             for (shard, last_block) in self.last_sidechain_blocks.iter() {
                 if let Err(e) = db.put((LAST_BLOCK_KEY, shard).encode(), last_block.encode()) {
                     error!("Could not write last block to sidechain db due to {}", e);
+                    return Err(DBError::OperationalError(e));
                 };
-            }
-            match db.get(STORED_SHARDS_KEY) {
-                Ok(Some(encoded_shards)) => {
-                    let shards: Vec<ShardIdentifier> = Decode::decode(&mut encoded_shards.as_slice()).unwrap();
-                    println!("retrieved shards {:?}", shards);
-                    for shard in shards {
-                        match db.get((LAST_BLOCK_KEY, shard).encode()) {
-                            Ok(Some(encoded_last_block)) => {
-                                let last_block = LastSidechainBlock::decode(&mut encoded_last_block.as_slice()).unwrap();
-                                println!("retrieved value {:?}", last_block);
-                            },
-                            Ok(None) => println!("value not found"),
-                            Err(e) => println!("operational problem encountered: {}", e),
-                        }
-                    }
-                },
-                Ok(None) => println!("value not found"),
-                Err(e) => println!("operational problem encountered: {}", e),
             }
         }
         Ok(())

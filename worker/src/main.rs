@@ -796,7 +796,7 @@ pub unsafe extern "C" fn ocall_send_block_and_confirmation(
     debug!("    Entering ocall_send_block_and_confirmation");
     let mut status = sgx_status_t::SGX_SUCCESS;
     let mut confirmations_slice = slice::from_raw_parts(confirmations, confirmations_size as usize);
-    let mut signed_blocks_slice =
+    let signed_blocks_slice =
         slice::from_raw_parts(signed_blocks_ptr, signed_blocks_size as usize);
 
     let api = Api::<sr25519::Pair>::new(NODE_URL.lock().unwrap().clone()).unwrap();
@@ -830,13 +830,16 @@ pub unsafe extern "C" fn ocall_send_block_and_confirmation(
 
     // handle blocks
     if let Ok(mut sidechain_db) = SidechainDB::new_from_encoded(signed_blocks_slice) {
-        println! {"Received blocks: {:?}", sidechain_db.signed_blocks};
+        println!{"Received blocks: {:?}", sidechain_db.signed_blocks};
         if let Err(_) = sidechain_db.update_db() {
             status = sgx_status_t::SGX_ERROR_UNEXPECTED;
         };
+    } else {
+        status = sgx_status_t::SGX_ERROR_UNEXPECTED;
     }
 
-    // TODO: M8.3: broadcast blocks
+
+    // TODO: M8.3: broadcast new blocks
     status
 }
 
