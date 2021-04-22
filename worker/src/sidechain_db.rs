@@ -198,7 +198,7 @@ mod tests {
     #[test]
     fn sidechain_db_struct_works() {
         // given
-        let path = "../db_test/_sidechain_db_struct_works";
+        let path = "../bin/_sidechain_db_struct_works";
         let shard_one = H256::from_low_u64_be(1);
         let shard_two = H256::from_low_u64_be(2);
         let signed_block_one = create_signed_block(20, shard_one);
@@ -236,7 +236,7 @@ mod tests {
     #[test]
     fn update_db_from_encoded_works() {
         // given
-        let path = "../db_test/_update_db_from_encoded_works";
+        let path = "../bin/_update_db_from_encoded_works";
         let shard_one = H256::from_low_u64_be(1);
         let shard_two = H256::from_low_u64_be(2);
         let signed_block_one = create_signed_block(20, shard_one);
@@ -291,7 +291,7 @@ mod tests {
     #[test]
     fn block_succession_check_works() {
         // given
-        let path = "../db_test/_block_succession_check_works";
+        let path = "../bin/_block_succession_check_works";
         let shard_one = H256::from_low_u64_be(1);
         let shard_two = H256::from_low_u64_be(2);
         let signed_block_one_one = create_signed_block(20, shard_one);
