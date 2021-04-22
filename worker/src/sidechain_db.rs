@@ -60,6 +60,8 @@ pub enum DBError {
     OperationalError(rocksdb::Error),
     /// Blocknumber Succession error
     InvalidBlockNumberSuccession(SignedSidechainBlock),
+    /// Last block of shard not found
+    LastBlockNotFound(ShardIdentifier),
     /// Decoding Error
     DecodeError,
 }
@@ -84,6 +86,11 @@ pub struct SidechainDB {
     /// map to last sidechain block of every shard
     pub last_blocks: HashMap<ShardIdentifier, LastSidechainBlock>,
 }
+
+
+//FIXME: create key functions, such that blocknumer is always in the same format & nothing can get mixed up!
+//TODO: create purge_old_blocks function
+//TODO: create unit tests for shard purge & purge_oldBlocks function
 
 impl SidechainDB {
     pub fn new(path: &str) -> Result<SidechainDB, DBError> {
@@ -184,6 +191,55 @@ impl SidechainDB {
         };
         Ok(())
     }
+
+    /// purges a shard and its block from the db storage
+    pub fn purge_shard(&mut self, shard: ShardIdentifier) -> Result<(), DBError> {
+        // get all shards
+        if self.shards.contains(&shard) {
+            // remove shard from list
+            self.shards.retain(|&x| x != shard);
+            //FIXME: Errorhandling
+            self.db.put(STORED_SHARDS_KEY.encode(), self.shards.encode()).unwrap();
+            // get last block of shard
+            let mut last_block: &LastSidechainBlock = match self.last_blocks.get(&shard) {
+                Some(last_block) => last_block,
+                None => return Err(DBError::LastBlockNotFound(shard))
+            };
+            // remove last block from storage
+            // FIXME: Errorhandling
+            self.db.delete(last_block.hash.encode()).unwrap();
+            self.db.delete((shard, last_block.number).encode()).unwrap();
+            self.db.delete((LAST_BLOCK_KEY, shard).encode()).unwrap();
+
+            //FIXME: Check -> does this make sense? Unit test!
+            while(true) {
+                match self.get_previous_block(shard, last_block.number) {
+                    Some(previous_block) => {
+                        last_block = previous_block;
+                        // FIXME: Errorhandling
+                        self.db.delete(last_block.hash.encode()).unwrap();
+                        self.db.delete((shard, last_block.number).encode()).unwrap();
+                    }
+                    None => break,
+                }
+            }
+
+        }
+        Ok(())
+    }
+
+    // gets the previous block in chain of current block
+    fn get_previous_block(&self, shard: ShardIdentifier, current_block_number: SidechainBlockNumber) -> Option<&LastSidechainBlock> {
+        if let Some(block_hash_encoded) = self.db.get((shard, current_block_number).encode()).unwrap() {
+            let block_hash = H256::decode(&mut block_hash_encoded.as_slice()).unwrap();
+            &LastSidechainBlock {
+                hash: block_hash.into(),
+                number: current_block_number - 1,
+            };
+        }
+        None
+    }
+
 }
 
 
