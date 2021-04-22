@@ -217,18 +217,20 @@ mod tests {
         }
 
         // then
-        let updated_sidechain_db = SidechainDB::new(path).unwrap();
-        assert_eq!(updated_sidechain_db.shards[0], shard_one);
-        assert_eq!(updated_sidechain_db.shards[1], shard_two);
-        let last_block_one: &LastSidechainBlock = updated_sidechain_db.last_blocks.get(&shard_one).unwrap();
-        let last_block_two: &LastSidechainBlock = updated_sidechain_db.last_blocks.get(&shard_two).unwrap();
-        assert_eq!(last_block_one.number, 20);
-        assert_eq!(last_block_two.number, 1);
-        assert_eq!(last_block_one.hash, signed_block_one.hash().into());
-        assert_eq!(last_block_two.hash, signed_block_two.hash().into());
+        {
+            let updated_sidechain_db = SidechainDB::new(path).unwrap();
+            assert_eq!(updated_sidechain_db.shards[0], shard_one);
+            assert_eq!(updated_sidechain_db.shards[1], shard_two);
+            let last_block_one: &LastSidechainBlock = updated_sidechain_db.last_blocks.get(&shard_one).unwrap();
+            let last_block_two: &LastSidechainBlock = updated_sidechain_db.last_blocks.get(&shard_two).unwrap();
+            assert_eq!(last_block_one.number, 20);
+            assert_eq!(last_block_two.number, 1);
+            assert_eq!(last_block_one.hash, signed_block_one.hash().into());
+            assert_eq!(last_block_two.hash, signed_block_two.hash().into());
+        }
 
         // clean up
-        let _ = DB::destroy(&Options::default(), path);
+        let _ = DB::destroy(&Options::default(), path).unwrap();
     }
 
     #[test]
@@ -257,30 +259,32 @@ mod tests {
         }
 
         // then
-        let updated_sidechain_db = SidechainDB::new(path).unwrap();
-        // shards
-        assert_eq!(updated_sidechain_db.shards[0], shard_one);
-        assert_eq!(updated_sidechain_db.shards[1], shard_two);
-        // last blocks
-        let last_block_one: &LastSidechainBlock = updated_sidechain_db.last_blocks.get(&shard_one).unwrap();
-        let last_block_two: &LastSidechainBlock = updated_sidechain_db.last_blocks.get(&shard_two).unwrap();
-        assert_eq!(last_block_one.number, 20);
-        assert_eq!(last_block_two.number, 1);
-        assert_eq!(last_block_one.hash, signed_block_one.hash().into());
-        assert_eq!(last_block_two.hash, signed_block_two.hash().into());
-        // (shard,blocknumber) -> blockhash
-        let db_block_hash_one = H256::decode(&mut updated_sidechain_db.db.get((shard_one, 20 as SidechainBlockNumber).encode()).unwrap().unwrap().as_slice()).unwrap();
-        let db_block_hash_two = H256::decode(&mut updated_sidechain_db.db.get((shard_two, 1 as SidechainBlockNumber).encode()).unwrap().unwrap().as_slice()).unwrap();
-        assert_eq!(db_block_hash_one, signed_block_one.hash().into());
-        assert_eq!(db_block_hash_two, signed_block_two.hash().into());
-        // block hash -> signed block
-        let db_block_one = SignedSidechainBlock::decode(&mut updated_sidechain_db.db.get(&last_block_one.hash.encode()).unwrap().unwrap().as_slice()).unwrap();
-        let db_block_two = SignedSidechainBlock::decode(&mut updated_sidechain_db.db.get(&last_block_two.hash.encode()).unwrap().unwrap().as_slice()).unwrap();
-        assert_eq!(db_block_one, signed_block_one);
-        assert_eq!(db_block_two, signed_block_two);
+        {
+            let updated_sidechain_db = SidechainDB::new(path).unwrap();
+            // shards
+            assert_eq!(updated_sidechain_db.shards[0], shard_one);
+            assert_eq!(updated_sidechain_db.shards[1], shard_two);
+            // last blocks
+            let last_block_one: &LastSidechainBlock = updated_sidechain_db.last_blocks.get(&shard_one).unwrap();
+            let last_block_two: &LastSidechainBlock = updated_sidechain_db.last_blocks.get(&shard_two).unwrap();
+            assert_eq!(last_block_one.number, 20);
+            assert_eq!(last_block_two.number, 1);
+            assert_eq!(last_block_one.hash, signed_block_one.hash().into());
+            assert_eq!(last_block_two.hash, signed_block_two.hash().into());
+            // (shard,blocknumber) -> blockhash
+            let db_block_hash_one = H256::decode(&mut updated_sidechain_db.db.get((shard_one, 20 as SidechainBlockNumber).encode()).unwrap().unwrap().as_slice()).unwrap();
+            let db_block_hash_two = H256::decode(&mut updated_sidechain_db.db.get((shard_two, 1 as SidechainBlockNumber).encode()).unwrap().unwrap().as_slice()).unwrap();
+            assert_eq!(db_block_hash_one, signed_block_one.hash().into());
+            assert_eq!(db_block_hash_two, signed_block_two.hash().into());
+            // block hash -> signed block
+            let db_block_one = SignedSidechainBlock::decode(&mut updated_sidechain_db.db.get(&last_block_one.hash.encode()).unwrap().unwrap().as_slice()).unwrap();
+            let db_block_two = SignedSidechainBlock::decode(&mut updated_sidechain_db.db.get(&last_block_two.hash.encode()).unwrap().unwrap().as_slice()).unwrap();
+            assert_eq!(db_block_one, signed_block_one);
+            assert_eq!(db_block_two, signed_block_two);
+        }
 
         // clean up
-        let _ = DB::destroy(&Options::default(), path);
+        let _ = DB::destroy(&Options::default(), path).unwrap();
     }
 
 
@@ -316,40 +320,42 @@ mod tests {
         }
 
          // then
+         {
          let updated_sidechain_db = SidechainDB::new(path).unwrap();
          // shards
-         assert_eq!(updated_sidechain_db.shards[0], shard_one);
-         assert_eq!(updated_sidechain_db.shards[1], shard_two);
-         // last blocks
-         let last_block_one: &LastSidechainBlock = updated_sidechain_db.last_blocks.get(&shard_one).unwrap();
-         let last_block_two: &LastSidechainBlock = updated_sidechain_db.last_blocks.get(&shard_two).unwrap();
-         assert_eq!(last_block_one.number, 21);
-         assert_eq!(last_block_two.number, 1);
-         assert_eq!(last_block_one.hash, signed_block_one_two.hash().into());
-         assert_eq!(last_block_two.hash, signed_block_two_one.hash().into());
-         // (shard,blocknumber) -> blockhash
-         let db_block_hash_one_one = H256::decode(&mut updated_sidechain_db.db.get((shard_one, 20 as SidechainBlockNumber).encode()).unwrap().unwrap().as_slice()).unwrap();
-         let db_block_hash_one_two = H256::decode(&mut updated_sidechain_db.db.get((shard_one, 21 as SidechainBlockNumber).encode()).unwrap().unwrap().as_slice()).unwrap();
-         let db_block_hash_two_one = H256::decode(&mut updated_sidechain_db.db.get((shard_two, 1 as SidechainBlockNumber).encode()).unwrap().unwrap().as_slice()).unwrap();
-         assert_eq!(db_block_hash_one_one, signed_block_one_one.hash().into());
-         assert_eq!(db_block_hash_two_one, signed_block_two_one.hash().into());
-         assert_eq!(db_block_hash_one_two, signed_block_one_two.hash().into());
-         // ensure block number 3 is empty
-         let db_block_hash_empty = updated_sidechain_db.db.get((shard_two, 3 as SidechainBlockNumber).encode()).unwrap();
-         assert_eq!(db_block_hash_empty, None);
-         // block hash -> signed block
-         let db_block_one_one = SignedSidechainBlock::decode(&mut updated_sidechain_db.db.get(&signed_block_one_one.hash().encode()).unwrap().unwrap().as_slice()).unwrap();
-         let db_block_one_two = SignedSidechainBlock::decode(&mut updated_sidechain_db.db.get(&signed_block_one_two.hash().encode()).unwrap().unwrap().as_slice()).unwrap();
-         let db_block_two_one = SignedSidechainBlock::decode(&mut updated_sidechain_db.db.get(&signed_block_two_one.hash().encode()).unwrap().unwrap().as_slice()).unwrap();
-         assert_eq!(db_block_one_one, signed_block_one_one);
-         assert_eq!(db_block_one_two, signed_block_one_two);
-         assert_eq!(db_block_two_one, signed_block_two_one);
-         // ensure block number 3 was not included
-         let db_block_empty = updated_sidechain_db.db.get(&signed_block_two_two.hash().encode()).unwrap();
-         assert_eq!(db_block_empty, None);
+            assert_eq!(updated_sidechain_db.shards[0], shard_one);
+            assert_eq!(updated_sidechain_db.shards[1], shard_two);
+            // last blocks
+            let last_block_one: &LastSidechainBlock = updated_sidechain_db.last_blocks.get(&shard_one).unwrap();
+            let last_block_two: &LastSidechainBlock = updated_sidechain_db.last_blocks.get(&shard_two).unwrap();
+            assert_eq!(last_block_one.number, 21);
+            assert_eq!(last_block_two.number, 1);
+            assert_eq!(last_block_one.hash, signed_block_one_two.hash().into());
+            assert_eq!(last_block_two.hash, signed_block_two_one.hash().into());
+            // (shard,blocknumber) -> blockhash
+            let db_block_hash_one_one = H256::decode(&mut updated_sidechain_db.db.get((shard_one, 20 as SidechainBlockNumber).encode()).unwrap().unwrap().as_slice()).unwrap();
+            let db_block_hash_one_two = H256::decode(&mut updated_sidechain_db.db.get((shard_one, 21 as SidechainBlockNumber).encode()).unwrap().unwrap().as_slice()).unwrap();
+            let db_block_hash_two_one = H256::decode(&mut updated_sidechain_db.db.get((shard_two, 1 as SidechainBlockNumber).encode()).unwrap().unwrap().as_slice()).unwrap();
+            assert_eq!(db_block_hash_one_one, signed_block_one_one.hash().into());
+            assert_eq!(db_block_hash_two_one, signed_block_two_one.hash().into());
+            assert_eq!(db_block_hash_one_two, signed_block_one_two.hash().into());
+            // ensure block number 3 is empty
+            let db_block_hash_empty = updated_sidechain_db.db.get((shard_two, 3 as SidechainBlockNumber).encode()).unwrap();
+            assert_eq!(db_block_hash_empty, None);
+            // block hash -> signed block
+            let db_block_one_one = SignedSidechainBlock::decode(&mut updated_sidechain_db.db.get(&signed_block_one_one.hash().encode()).unwrap().unwrap().as_slice()).unwrap();
+            let db_block_one_two = SignedSidechainBlock::decode(&mut updated_sidechain_db.db.get(&signed_block_one_two.hash().encode()).unwrap().unwrap().as_slice()).unwrap();
+            let db_block_two_one = SignedSidechainBlock::decode(&mut updated_sidechain_db.db.get(&signed_block_two_one.hash().encode()).unwrap().unwrap().as_slice()).unwrap();
+            assert_eq!(db_block_one_one, signed_block_one_one);
+            assert_eq!(db_block_one_two, signed_block_one_two);
+            assert_eq!(db_block_two_one, signed_block_two_one);
+            // ensure block number 3 was not included
+            let db_block_empty = updated_sidechain_db.db.get(&signed_block_two_two.hash().encode()).unwrap();
+            assert_eq!(db_block_empty, None);
+         }
 
          // clean up
-         let _ = DB::destroy(&Options::default(), path);
+         let _ = DB::destroy(&Options::default(), path).unwrap();
     }
 
     fn create_signed_block(block_number: u64, shard: ShardIdentifier) -> SignedSidechainBlock {
