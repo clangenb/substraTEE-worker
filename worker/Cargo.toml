@@ -47,7 +47,7 @@ path = "../primitives/node"
 path = "../primitives/worker"
 
 [dependencies.substratee-worker-api]
-path = "worker-api"
+path = "rpc/client"
 
 [dependencies.my-node-runtime]
 git = "https://github.com/scs/substraTEE-node"
